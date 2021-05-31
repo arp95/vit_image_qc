@@ -1,0 +1,415 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This notebook 
+
+- reads CPA-generated CSV files
+- combines and filters them
+- cleans up
+- creates SQLite files that can be read by CPA, in a way that images with the same channel set are batched together
+- downloads the image files to the right location
+
+Environment
+
+- Windows machine
+- AWS credentials are set up
+- Lots of luck
+
+Instructions for running the notebook on a new set:
+1. Zip the CSV files and give it a unique name e.g. `DavidPearlQCFixed_6channel` in the example below
+2. Upload `DavidPearlQCFixed_6channel.zip` to s3://jump-cellpainting/projects/2019_07_11_JUMP-CP-pilots/workspace/qc_postprocessing/DavidPearlQCFixed_6channel.zip
+3. Set the variable `setname` in the R chunk below to name you gave the zip file i.e. `setname <- "DavidPearlQCFixed_6channel"`
+4. Also set this variable in the sh chunk below i.e. `setname=DavidPearlQCFixed_6channel`
+5. Set the variable `nd2` in the R chunk below to `TRUE` if you want only `nd2` files or `FALSE` if you want everything but `nd2` files
+6. Run the whole notebook in RStudio (Code > Run Region > Run All). It will run everything except the last two chucks. 
+7. Run the last two chunks (Download) by hand, after verifying that all previous chunks have run ok.
+
+
+```{r eval=FALSE}
+install.packages("magrittr")
+install.packages("tidyverse")
+install.packages("rmarkdown")
+install.packages("RSQLite")
+install.packages("glue")
+install.packages("arrow")
+install.packages("doParallel")
+```
+
+
+```{r message=FALSE}
+library(magrittr)
+library(tidyverse)
+library(RSQLite)
+library(glue)
+library(arrow)
+library(doParallel)
+library(foreach)
+```
+
+
+```{r}
+registerDoParallel()
+```
+
+```{r}
+set.seed(42)
+```
+
+`setname` is the name of directory on the Desktop that contains the CSV files
+
+Be sure to delete the `*.sqlite` files by hand 
+
+```
+cannot remove file 'C:/Users/Administrator/Desktop/DavidPearlQCFixed_AGP_DNA_ER_Mito.sqlite', reason 'Permission denied'Error: Table DavidPearlQCFixed exists in database, and both overwrite and append are FALSE
+```
+
+```{r}
+setname <- "DavidPearlQCFixed_6channel"
+```
+
+Specify the Windows drive where files will be downloaded
+
+```{r}
+destination_windows_drive <- "D:\\"
+```
+
+Specify whether to randomly sample (TRUE when testing downloads)
+
+```{r}
+randomly_sample <- FALSE
+```
+
+Download nd2 files or non-nd2 files
+
+```{r}
+nd2 <- FALSE
+```
+
+Specify how to fix Nikon paths to point to location of tifs
+
+```{r}
+nikon_fix_posix <- function(x) str_replace(x, "2020_11_24_Scope1_Nikon", "2020_11_24_Scope1_Nikon/tifs")
+nikon_fix_windows <- function(x) str_replace(x, "2020_11_24_Scope1_Nikon", "2020_11_24_Scope1_Nikon\\\\tifs")
+```
+
+
+```{r}
+setname_output_suffix <- ifelse(nd2, "only_nd2", "exclude_nd2")
+setname_output <- paste(setname, setname_output_suffix, sep = "_")
+```
+
+
+```{r}
+if (Sys.info()['sysname'] == "Darwin") {
+  output_dir <- "~/Desktop"
+  image_output_dir <- normalizePath("~/work/projects/2019_07_11_JUMP-CP")
+} else if (Sys.info()['sysname'] == "Linux") {
+  output_dir <- "/dgx1nas1/cellpainting-datasets/2019_07_11_JUMP_CP_pilots/workspace/qc_postprocessing"
+  image_output_dir <- normalizePath("/dgx1nas1/cellpainting-datasets/2019_07_11_JUMP-CP")
+} else { 
+  output_dir <- "C:/Users/Administrator/Desktop"
+  image_output_dir <- "D:"
+  destination_windows_drive <- paste0(image_output_dir, "\\")
+}
+```
+
+
+Your `~/.aws/credentials` should contain `jump-cellpainting` account credentials as the default profile
+
+```
+[default]
+aws_access_key_id = XXXX
+aws_secret_access_key = XXXX
+```
+
+```{sh}
+output_dir=~/Desktop #OSX (for testing only)
+#output_dir=/dgx1nas1/cellpainting-datasets/2019_07_11_JUMP_CP_pilots/workspace/qc_postprocessing #Linux
+output_dir=C:/Users/Administrator/Desktop #Windows
+setname=DavidPearlQCFixed_6channel
+aws s3 cp --no-progress s3://jump-cellpainting/projects/2019_07_11_JUMP-CP-pilots/workspace/qc_postprocessing/${setname}.zip ${output_dir}
+rm -rf ${output_dir}/${setname}
+mkdir ${output_dir}/${setname}
+unzip ${output_dir}/${setname}.zip -d ${output_dir}/${setname}
+```
+
+
+```{r}
+list.files(glue("{output_dir}/{setname}/"), full.names = T, pattern = "*.csv")
+```
+
+Read them into a parquet file (for efficiency)
+
+```{r}
+parquet_file <- glue("{output_dir}/{setname}.parquet")
+
+if (file.exists(parquet_file)) {
+  df <- arrow::read_parquet(parquet_file)
+  
+} else {
+  df <-
+    list.files(glue("{output_dir}/{setname}/"), full.names = T, pattern = "*.csv") %>%
+    map_df(
+      read_csv,
+      col_types = cols(Image_Metadata_Plate = col_character(), PlateID = col_character())
+    )
+  
+  df %>% arrow::write_parquet(parquet_file)
+  
+}
+```
+
+Filter down to only the rows you care about
+
+```{r}
+df %<>% filter(UserAnnotation_Debris == 1)
+```
+
+
+Pick nd2 files or other files
+
+```{r eval=TRUE}
+any_filename <- str_subset(names(df), "Image_URL_")[[1]]
+
+if (!nd2) {
+  df %<>% filter(!str_detect(.data[[any_filename]], "nd2")) 
+} else {
+  df %<>% filter(str_detect(.data[[any_filename]], "nd2")) 
+}
+```
+
+Random sample (optional)
+
+```{r}
+if(randomly_sample) {
+  df %<>% sample_n(3)
+}
+```
+
+Fix wells
+
+```{r}
+df %<>% 
+  mutate(Image_Metadata_Well = 
+           ifelse(is.na(Image_Metadata_Well),
+                  Image_Metadata_Well_x,
+                  Image_Metadata_Well)
+  )
+```
+
+Change the URL to S3
+
+```{r}
+s3ify  <- function(x) {
+  if (is.na(x)) {
+    NA
+  } else {
+    str_replace(x, "file:", "s3:/") %>% str_replace_all("\\\\", "/")  %>% str_replace_all("home/ubuntu/bucket", "jump-cellpainting") %>% URLdecode()
+  }
+}
+  
+
+df %<>% rowwise() %>% mutate(across(matches("URL"), s3ify)) %>% ungroup()
+```
+
+Fix URLs
+
+```{r}
+channel_names <- names(df) %>% str_subset("URL") %>% str_remove_all("Image_URL_")
+
+for (channel_name in channel_names) {
+  filename_column <- glue("Image_FileName_{channel_name}")
+  
+  url_column <- glue("Image_URL_{channel_name}")
+  
+  df[[url_column]] <-
+    mapply(function(url_column_i,
+                    filename_column_i)
+      if (is.na(url_column_i)) {
+        NA
+      }
+      else {
+        paste(
+          URLdecode(dirname(url_column_i)),
+          URLdecode(filename_column_i),
+          sep = "/")
+      },
+      df[[url_column]],
+      df[[filename_column]]) %>%
+    unname()
+}
+
+```
+
+Force the drive to be wherever you plan to down the files on the Windows machine
+
+```{r}
+drive_fix <- function(x) str_replace(x, "^[A-Z]:\\\\", destination_windows_drive)
+
+df %<>% rowwise() %>% mutate(across(matches("Image_PathName"), drive_fix)) %>% ungroup()
+```
+
+Fix paths for the Nikon images
+
+```{r}
+df %<>% rowwise() %>% mutate(across(matches("Image_PathName"), nikon_fix_windows)) %>% ungroup()
+
+df %<>% rowwise() %>% mutate(across(matches("Image_URL"), nikon_fix_posix)) %>% ungroup()
+```
+
+Save as a set of SQLite files
+
+```{r}
+channels <- 
+  df %>% 
+  select(Image_Metadata_Plate, matches("PathName")) %>% 
+  mutate(across(matches("PathName"), ~is.na(.))) %>% 
+  distinct() 
+
+channels %<>% 
+  pivot_longer(-Image_Metadata_Plate) %>% 
+  filter(!value) %>% select(-value) %>% 
+  arrange(Image_Metadata_Plate, name) %>% 
+  group_by(Image_Metadata_Plate) %>% 
+  summarise(Image_Metadata_Group = paste(name, collapse = "_"), .groups = "keep") %>% 
+  ungroup() %>% 
+  inner_join(channels) %>% 
+  arrange(Image_Metadata_Group) %>%
+  mutate(Image_Metadata_Group = str_remove_all(Image_Metadata_Group, "Image_PathName_Orig"))
+
+channels %>% 
+  pivot_longer(-any_of(c("Image_Metadata_Plate", "Image_Metadata_Group"))) %>% 
+  ggplot(aes(name, Image_Metadata_Plate, fill = value)) + 
+  geom_tile(color = "black") + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+channels %>% group_by(Image_Metadata_Group) %>% tally()
+
+df %<>% inner_join(channels %>% select(Image_Metadata_Plate, Image_Metadata_SaraspondaGroup = Image_Metadata_Group))
+```
+
+```{r}
+for (group in unique(df$Image_Metadata_SaraspondaGroup)) {
+  
+  sqlite_file <- glue("{output_dir}/{setname_output}_{group}.sqlite")
+  
+  if(file.exists(sqlite_file)) {
+    file.remove(sqlite_file)
+    
+  }
+  
+  dfi <- df %>% filter(Image_Metadata_SaraspondaGroup == group)
+  
+  dfi$Image_Metadata_MasterIndex <- seq_along(dfi$Image_Metadata_MasterIndex)
+
+  dfi %>% count(name = group) %>% print()
+  
+  mydb <- dbConnect(SQLite(), sqlite_file)
+  
+  dbWriteTable(mydb, setname, dfi)
+  
+  dbDisconnect(mydb)
+}
+```
+
+Save list of files to be downloaded
+
+```{r}
+files <-
+  df %>%
+  ungroup() %>%
+  select(matches("Image_URL_")) %>%
+  pivot_longer(everything()) %>%
+  na.omit() %>%
+  mutate(folder = str_remove(
+    dirname(value),
+    "s3://jump-cellpainting/projects/2019_07_11_JUMP-CP-pilots/"
+  )) %>%
+  mutate(filename = basename(value)) %>%
+  mutate(prefix = dirname(value)) %>%
+  select(folder, filename, object = value, prefix)
+```
+
+Create commands to create directories
+
+```{r}
+dirs <-
+  files %>%
+  distinct(folder) %>%
+  mutate(mkdir = glue("mkdir -p {image_output_dir}/{folder}"))
+```
+
+Create commands to download
+
+```{r}
+files %<>%
+  mutate(download = glue('aws s3 cp --quiet "{object}" "{image_output_dir}/{folder}/{filename}"'))
+```
+
+Create directories
+
+```{r}
+foreach(d=iter(dirs, by = "row"), .combine = "rbind") %dopar% {
+  result = system(d$mkdir); 
+  data.frame(folder = d$folder, result = result)
+}
+```
+
+Download files
+
+```{r eval=FALSE}
+download_result <- foreach(d=iter(files, by = "row"), .combine = "rbind") %dopar% {
+  result = system(d$download); 
+  data.frame(folder = d$folder, filename = d$filename, object = d$object, result = result)
+}
+
+download_result_file <- glue("{output_dir}/{setname_output}_{group}_download_result.csv")
+
+write_csv(download_result, download_result_file)
+```
+
+
+```{r eval=FALSE}
+download_result
+```
+
+
+Update variables in properties file (see `data/QC*.properties` for sample files)
+
+Examples
+
+Typical 5-channel (DNA,ER,AGP,Mito,RNA)
+
+```
+db_sqlite_file  = C:\Users\Administrator\Desktop\DavidPearlQCFixed_AGP_DNA_ER_Mito_RNA.sqlite
+image_table   = DavidPearlQCFixed
+image_path_cols = Image_PathName_OrigDNA,Image_PathName_OrigER,Image_PathName_OrigAGP,Image_PathName_OrigMito,Image_PathName_OrigRNA
+image_file_cols = Image_FileName_OrigDNA,Image_FileName_OrigER,Image_FileName_OrigAGP,Image_FileName_OrigMito,Image_FileName_OrigRNA
+image_names = DNA,ER,AGP,Mito,RNA
+image_channel_colors = blue,magenta,green,red,cyan
+```
+
+4-channel (DNA,ER,AGP,Mito)
+
+```
+db_sqlite_file  = C:\Users\Administrator\Desktop\DavidPearlQCFixed_AGP_DNA_ER_Mito.sqlite
+image_table   = DavidPearlQCFixed
+image_path_cols = Image_PathName_OrigDNA,Image_PathName_OrigER,Image_PathName_OrigAGP,Image_PathName_OrigMito
+image_file_cols = Image_FileName_OrigDNA,Image_FileName_OrigER,Image_FileName_OrigAGP,Image_FileName_OrigMito
+image_names = DNA,ER,AGP,Mito
+image_channel_colors = blue,magenta,green,red
+```
+
+6-channel (DNA,ER,Actin,Golgi,Mito,RNA)
+
+```
+db_sqlite_file  = C:\Users\Administrator\Desktop\DavidPearlQCFixed_Actin_DNA_ER_Golgi_Mito_RNA.sqlite
+image_table   = DavidPearlQCFixed
+image_path_cols = Image_PathName_OrigDNA,Image_PathName_OrigER,Image_PathName_OrigActin,Image_PathName_OrigGolgi,Image_PathName_OrigMito,Image_PathName_OrigRNA
+image_file_cols = Image_FileName_OrigDNA,Image_FileName_OrigER,Image_FileName_OrigActin,Image_FileName_OrigGolgi,Image_FileName_OrigMito,Image_FileName_OrigRNA
+image_names = DNA,ER,Actin,Golgi,Mito,RNA
+image_channel_colors = blue,magenta,green,red,yellow,yan
+```
+
