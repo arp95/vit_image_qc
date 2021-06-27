@@ -10,21 +10,20 @@ from PIL import Image
 import time
 import matplotlib
 import matplotlib.pyplot as plt
-from sklearn.metrics import confusion_matrix
 from PIL import ImageFile
 from dataset import *
 from utils import *
-from metrics import *
 from model import *
 
 
 # dataset and model paths
+val_path = "/dgx1nas1/cellpainting-datasets/2019_07_11_JUMP_CP_pilots/2021_03_03_Stain5_CondC_PE_Standard/images/BR00120277__2021-02-20T07_02_46-Measurement1/Images"
 model_path = "/home/jupyter-arpit@broadinstitu-ef612/qc_bestmodel_transformer.pth"
-val_path = "/dgx1nas1/cellpainting-datasets/2019_07_11_JUMP_CP_pilots/validation"
+output_path = "/home/jupyter-arpit@broadinstitu-ef612/test_transformer_5.csv"
 
 
 # create PyTorch dataset class and create val data and val_loader
-val_data = ImageQC_1channel_Dataset(val_path, resize=False, is_train=False)
+val_data = ImageQC_1channel_TestDataset(val_path, resize=False)
 val_loader = torch.utils.data.DataLoader(val_data, batch_size=1, shuffle=False, num_workers=0)
 print(len(val_data))
 
@@ -43,42 +42,42 @@ def get_config():
     config.representation_size = None
     return config
 
-device = torch.device("cuda:6" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:4" if torch.cuda.is_available() else "cpu")
 model = VisionTransformer(config=get_config(), num_classes=4, in_channels=1)
 model.to(device)
 model.load_state_dict(torch.load(model_path, map_location=device))
 
 
 # validation loop
-metrics = StreamMetrics(4)
-metrics.reset()
 model.eval()
-total = 0
-correct = 0
-for i, (input, target, lengths, image_path) in enumerate(val_loader):
+file_path = []
+file_labels = []
+file_good_prob = []
+file_blurry_prob = []
+file_empty_prob = []
+file_debris_prob = []
+for i, (input, image_path) in enumerate(val_loader):
     with torch.no_grad():
         input = input.to(device)
-        target = target.to(device)
-        lengths = lengths.to(device)
-        
         output = model(input)[0]
+        output_probs = output[0]
         _, predicted = output.max(1)
-        total += target.size(0)
-        correct += predicted.eq(target).sum().item()
-                
-        # get confusion matrix
-        targets = target.cpu().numpy()
-        predicted = predicted.cpu().numpy()
-        metrics.update(targets, predicted)
         
-        #if targets[0] == 0 and predicted[0] != 0:
-        #    print(predicted[0])
-        #    print(image_path)
+        # append the results
+        file_path.append(image_path[0])
+        file_labels.append(int(predicted[0]))
+        file_good_prob.append(round(float(output_probs[0]), 3))
+        file_blurry_prob.append(round(float(output_probs[1]), 3))
+        file_empty_prob.append(round(float(output_probs[2]), 3))
+        file_debris_prob.append(round(float(output_probs[3]), 3))
         
-valid_accuracy = str(100.0*(float(correct)/float(total)))
-results = metrics.get_results()
-confusion_matrix = results["Confusion Matrix"]
+        
+# write results
+with open(output_path, 'w', newline='') as csvfile:
+    spamwriter = csv.writer(csvfile)
+    spamwriter.writerow(["File Path", "Good Prob", "Blurry Prob", "Empty Prob", "Debris Prob", "Label"])
+    for index in range(0, len(file_path)):
+        spamwriter.writerow([str(file_path[index]), file_good_prob[index], file_blurry_prob[index], file_empty_prob[index], file_debris_prob[index], file_labels[index]])
+        
 print()
-print("Validation Accuracy: " + str(valid_accuracy))
-print(confusion_matrix)
-print()
+print("Done with processing!")

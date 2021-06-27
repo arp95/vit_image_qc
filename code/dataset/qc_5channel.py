@@ -25,7 +25,7 @@ class ImageQC_5channel_Dataset(torch.utils.data.Dataset):
         ImageQC_5channel_Dataset.
     """
     # init method
-    def __init__(self, files, img_size=1024, resize=True):
+    def __init__(self, files, img_size=1024, resize=True, is_train=True):
         """
         Args:
             files: path of the directory which contains the required images and labels
@@ -35,6 +35,7 @@ class ImageQC_5channel_Dataset(torch.utils.data.Dataset):
         self.files = files
         self.img_size = img_size
         self.resize = resize
+        self.is_train = is_train
         
         # get the file paths and their corresponding labels(0: good, 1: blurry, 2: empty, 3: debris)
         self.labels_0 = []
@@ -160,37 +161,118 @@ class ImageQC_5channel_Dataset(torch.utils.data.Dataset):
                                 self.labels_3.append(str(array[5]))
                                 
         # get good, empty and debris images
+        count_good = 0
+        count_blur = 0
+        count_empty = 0
+        count_debris = 0
+        self.train_dna_0 = []
+        self.train_rna_0 = []
+        self.train_er_0 = []
+        self.train_mito_0 = []
+        self.train_agp_0 = []
+        self.train_dna_1 = []
+        self.train_rna_1 = []
+        self.train_er_1 = []
+        self.train_mito_1 = []
+        self.train_agp_1 = []
+        self.train_dna_2 = []
+        self.train_rna_2 = []
+        self.train_er_2 = []
+        self.train_mito_2 = []
+        self.train_agp_2 = []
+        self.train_dna_3 = []
+        self.train_rna_3 = []
+        self.train_er_3 = []
+        self.train_mito_3 = []
+        self.train_agp_3 = []
         for index1 in range(0, len(self.labels_0)):
-            self.image_path_dna.append(self.image_path_dna_0[index1])
-            self.image_path_rna.append(self.image_path_rna_0[index1])
-            self.image_path_er.append(self.image_path_er_0[index1])
-            self.image_path_mito.append(self.image_path_mito_0[index1])
-            self.image_path_agp.append(self.image_path_agp_0[index1])
-            self.labels.append("0")
+            if self.is_train and index1%25 == 0:
+                self.train_dna_0.append(self.image_path_dna_0[index1])
+                self.train_rna_0.append(self.image_path_rna_0[index1])
+                self.train_er_0.append(self.image_path_er_0[index1])
+                self.train_mito_0.append(self.image_path_mito_0[index1])
+                self.train_agp_0.append(self.image_path_agp_0[index1])
+            elif self.is_train == False:
+                self.image_path_dna.append(self.image_path_dna_0[index1])
+                self.image_path_rna.append(self.image_path_rna_0[index1])
+                self.image_path_er.append(self.image_path_er_0[index1])
+                self.image_path_mito.append(self.image_path_mito_0[index1])
+                self.image_path_agp.append(self.image_path_agp_0[index1])
+                self.labels.append("0")
         
         for index1 in range(0, len(self.labels_1)):
-            self.image_path_dna.append(self.image_path_dna_1[index1])
-            self.image_path_rna.append(self.image_path_rna_1[index1])
-            self.image_path_er.append(self.image_path_er_1[index1])
-            self.image_path_mito.append(self.image_path_mito_1[index1])
-            self.image_path_agp.append(self.image_path_agp_1[index1])
-            self.labels.append("1")
+            if self.is_train and index1%1 == 0:
+                self.train_dna_1.append(self.image_path_dna_1[index1])
+                self.train_rna_1.append(self.image_path_rna_1[index1])
+                self.train_er_1.append(self.image_path_er_1[index1])
+                self.train_mito_1.append(self.image_path_mito_1[index1])
+                self.train_agp_1.append(self.image_path_agp_1[index1])
+            elif self.is_train == False:
+                self.image_path_dna.append(self.image_path_dna_1[index1])
+                self.image_path_rna.append(self.image_path_rna_1[index1])
+                self.image_path_er.append(self.image_path_er_1[index1])
+                self.image_path_mito.append(self.image_path_mito_1[index1])
+                self.image_path_agp.append(self.image_path_agp_1[index1])
+                self.labels.append("1")
         
         for index1 in range(0, len(self.labels_2)):
-            self.image_path_dna.append(self.image_path_dna_2[index1])
-            self.image_path_rna.append(self.image_path_rna_2[index1])
-            self.image_path_er.append(self.image_path_er_2[index1])
-            self.image_path_mito.append(self.image_path_mito_2[index1])
-            self.image_path_agp.append(self.image_path_agp_2[index1])
-            self.labels.append("2")
+            if self.is_train and index1%4 == 0:
+                self.train_dna_2.append(self.image_path_dna_2[index1])
+                self.train_rna_2.append(self.image_path_rna_2[index1])
+                self.train_er_2.append(self.image_path_er_2[index1])
+                self.train_mito_2.append(self.image_path_mito_2[index1])
+                self.train_agp_2.append(self.image_path_agp_2[index1])
+            elif self.is_train == False:
+                self.image_path_dna.append(self.image_path_dna_2[index1])
+                self.image_path_rna.append(self.image_path_rna_2[index1])
+                self.image_path_er.append(self.image_path_er_2[index1])
+                self.image_path_mito.append(self.image_path_mito_2[index1])
+                self.image_path_agp.append(self.image_path_agp_2[index1])
+                self.labels.append("2")
             
         for index1 in range(0, len(self.labels_3)):
-            self.image_path_dna.append(self.image_path_dna_3[index1])
-            self.image_path_rna.append(self.image_path_rna_3[index1])
-            self.image_path_er.append(self.image_path_er_3[index1])
-            self.image_path_mito.append(self.image_path_mito_3[index1])
-            self.image_path_agp.append(self.image_path_agp_3[index1])
-            self.labels.append("3")
+            if self.is_train and index1%1 == 0:
+                self.train_dna_3.append(self.image_path_dna_3[index1])
+                self.train_rna_3.append(self.image_path_rna_3[index1])
+                self.train_er_3.append(self.image_path_er_3[index1])
+                self.train_mito_3.append(self.image_path_mito_3[index1])
+                self.train_agp_3.append(self.image_path_agp_3[index1])
+            elif self.is_train == False:
+                self.image_path_dna.append(self.image_path_dna_3[index1])
+                self.image_path_rna.append(self.image_path_rna_3[index1])
+                self.image_path_er.append(self.image_path_er_3[index1])
+                self.image_path_mito.append(self.image_path_mito_3[index1])
+                self.image_path_agp.append(self.image_path_agp_3[index1])
+                self.labels.append("3")
+                
+                
+        if self.is_train == True:
+            for index in range(0, 240):
+                self.image_path_dna.append(self.train_dna_0[index])
+                self.image_path_dna.append(self.train_dna_1[index])
+                self.image_path_dna.append(self.train_dna_2[index])
+                self.image_path_dna.append(self.train_dna_3[index])
+                self.image_path_rna.append(self.train_rna_0[index])
+                self.image_path_rna.append(self.train_rna_1[index])
+                self.image_path_rna.append(self.train_rna_2[index])
+                self.image_path_rna.append(self.train_rna_3[index])
+                self.image_path_er.append(self.train_er_0[index])
+                self.image_path_er.append(self.train_er_1[index])
+                self.image_path_er.append(self.train_er_2[index])
+                self.image_path_er.append(self.train_er_3[index])
+                self.image_path_mito.append(self.train_mito_0[index])
+                self.image_path_mito.append(self.train_mito_1[index])
+                self.image_path_mito.append(self.train_mito_2[index])
+                self.image_path_mito.append(self.train_mito_3[index])
+                self.image_path_agp.append(self.train_agp_0[index])
+                self.image_path_agp.append(self.train_agp_1[index])
+                self.image_path_agp.append(self.train_agp_2[index])
+                self.image_path_agp.append(self.train_agp_3[index])
+                self.labels.append("0")
+                self.labels.append("1")
+                self.labels.append("2")
+                self.labels.append("3")
+                
                                 
                 
     # getitem method
