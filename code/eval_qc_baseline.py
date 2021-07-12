@@ -19,7 +19,7 @@ from metrics import *
 # dataset paths
 is_pretrained = True
 image_size = 1024
-model_path = "/home/jupyter-arpit@broadinstitu-ef612/qc_bestmodel_baseline_size2_pretrained.pth"
+model_path = "/home/jupyter-arpit@broadinstitu-ef612/qc_bestmodel_baseline.pth"
 val_path = "/dgx1nas1/cellpainting-datasets/2019_07_11_JUMP_CP_pilots/validation"
 
 

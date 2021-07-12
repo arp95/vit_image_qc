@@ -254,8 +254,11 @@ class VisionTransformer(nn.Module):
         self.classifier = config.classifier
         self.transformer = Transformer(config, img_size, vis, in_channels=in_channels, is_pretrained=is_pretrained, is_hybrid=is_hybrid)
         self.head = Linear(config.hidden_size, num_classes)
+        self.softmax = torch.nn.Softmax()
 
     def forward(self, x, lengths=None):
         x, attn_weights = self.transformer(x, lengths)
         logits = self.head(x[:, 0])
+        logits = self.softmax(logits)
         return logits, attn_weights
+
