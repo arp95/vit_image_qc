@@ -21,6 +21,7 @@ is_pretrained = True
 image_size = 1024
 model_path = "/home/jupyter-arpit@broadinstitu-ef612/qc_bestmodel_baseline.pth"
 val_path = "/dgx1nas1/cellpainting-datasets/2019_07_11_JUMP_CP_pilots/validation"
+gpu_on_dgx = "cuda:4"
 
 
 # create PyTorch dataset class and create val_data and the val_loader
@@ -47,7 +48,7 @@ model.fc = torch.nn.Sequential(
     torch.nn.Linear(512, 4)
 )
 
-device = torch.device("cuda:4" if torch.cuda.is_available() else "cpu")
+device = torch.device(gpu_on_dgx if torch.cuda.is_available() else "cpu")
 model.to(device)
 model.load_state_dict(torch.load(model_path, map_location=device))
 

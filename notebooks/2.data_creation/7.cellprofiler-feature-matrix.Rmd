@@ -1,0 +1,372 @@
+---
+title: "Generate CellProfiler feature set"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+```
+
+# Broad
+
+```{r}
+broad_qc <- 
+  arrow::read_parquet("output/qc_annotations.parquet")
+```
+
+Apply Arpit's filters
+
+```{r}
+broad_qc <-
+  broad_qc %>%
+  filter(filename != "Classifier_Nikon_10X_Batch9-Pearl") %>%
+  filter(!(UserAnnotation_Blurry == 1 & image_width <= 2000)) %>%
+  filter(!is_nd2)
+```
+
+
+```{r}
+broad_qc_user <-
+  broad_qc %>%
+  select(
+    Image_Metadata_Plate,
+    Image_Metadata_Well,
+    Image_Metadata_Site,
+    matches("UserAnnotation"),
+    matches("Image_ImageQuality"),
+    matches("Image_URL_")
+  ) %>%
+  rename_with( ~ str_remove(., "UserAnnotation_"), .cols = matches("UserAnnotation_"))
+
+broad_qc_cpa <-
+  broad_qc %>%
+  select(
+    Image_Metadata_Plate,
+    Image_Metadata_Well,
+    Image_Metadata_Site,
+    matches("CPAScore"),
+    matches("Image_ImageQuality"),
+    matches("Image_URL_")
+  ) %>%
+  rename_with( ~ str_remove(., "CPAScore_"), .cols = matches("CPAScore_")) %>%
+  rename_with( ~ str_remove(., "ImageCount"), .cols = matches("ImageCount")) 
+
+stopifnot(all(names(broad_qc_cpa) == names(broad_qc_user)))
+
+broad_qc <-
+  bind_rows(
+    broad_qc_cpa %>% mutate(source = "cpa", .before = "Image_Metadata_Plate"),
+    broad_qc_user %>% mutate(source = "user", .before = "Image_Metadata_Plate")
+  )
+
+rm(broad_qc_cpa)
+rm(broad_qc_user)
+```
+
+
+```{r}
+get_channel_data <-
+  function(channel, df) {
+    df %>%
+      select(-matches("Image_ImageQuality|Image_URL_"),
+             matches(paste0("Image_URL_.*", channel)),
+             matches(paste0("Image_ImageQuality_.*", channel))) %>%
+      rename_with( ~ str_remove(., paste0("_", channel)),
+                   .cols = matches(channel)) %>%
+      rename_with( ~ str_remove(., "^Image_"),
+                   .cols = matches("^Image_ImageQuality_")) %>%
+      mutate(Image_URL = Image_URL %>%
+               str_remove("file:\\\\home\\\\ubuntu\\\\bucket\\\\projects\\\\2019_07_11_JUMP-CP-pilots\\\\") %>%
+               str_replace_all("\\\\", "/")
+               ) %>%
+      mutate(channel = str_remove(channel, "^Orig"), .before = "source") %>%
+      select(-any_of(
+        c(
+          "ImageQuality_ThresholdOtsu_2W",
+          "ImageQuality_ThresholdOtsu_3FW"
+        )
+      )) # remove because not present in all
+  }
+```
+
+
+```{r}
+broad_qc <- 
+  c("OrigDNA", "OrigRNA", "OrigER", "OrigMito", "OrigAGP", "OrigActin", "OrigGolgi") %>%
+  map_df(function(channel) get_channel_data(channel, broad_qc)) %>%
+  na.omit()
+```
+
+NOTE: This mapping does not allow multiple labels for an image!
+
+```{r}
+broad_qc <-
+  broad_qc %>%
+  mutate(Class = case_when(
+    Debris == 1 ~ "Debris",
+    Empty == 1 ~ "Empty",
+    Blurry == 1 ~ "Blurry",
+    Good == 1 ~ "Good"
+  ))
+```
+
+
+```{r}
+broad_qc %>%
+  filter(source == "cpa" &
+           Image_Metadata_Plate == "Plate3_PCO_6ch_4site_10XPA_Crestz") %>%
+  count(Class) %>% 
+  arrange(Class)
+```
+```{r}
+broad_qc %>%
+  filter(source == "cpa" &
+           Image_Metadata_Plate == "Plate3_PCO_6ch_4site_10XPA_Crestz") %>%
+  summarise(across(matches("Debris|Empty|Blurry|Good"), sum)) %>%
+  pivot_longer(everything(), names_to = "Class", values_to = "n") %>% 
+  arrange(Class)
+```
+The difference in Good counts is because some wells are labeled Good + some other class
+
+```{r}
+broad_qc %>%
+  filter(source == "cpa" &
+           Image_Metadata_Plate == "Plate3_PCO_6ch_4site_10XPA_Crestz") %>%
+  filter(Debris + Blurry + Empty + Good > 1) %>%
+  count()
+```
+
+
+```{r}
+broad_qc <- 
+  broad_qc %>% 
+  mutate(Metadata_Partner = "Broad") %>%
+  select(Class,
+         Metadata_Partner,
+         Metadata_Source = source,
+         Metadata_Plate = Image_Metadata_Plate,
+         Metadata_Well = Image_Metadata_Well,
+         Metadata_Site = Image_Metadata_Site,
+         Metadata_Channel = channel,
+         Metadata_FileLocation = Image_URL,
+         matches("ImageQuality_"))
+```
+
+
+```{r}
+MyTrainingSet_5channel_urls <-
+  read_csv("input/debris_annotations/MyTrainingSet_5channel_urls.csv",
+           col_types = cols())
+
+MyTrainingSet_5channel_urls %>% count()
+
+debris_images <-
+  MyTrainingSet_5channel_urls %>%
+  select(
+    Metadata_Plate = Image_Metadata_Plate,
+    Metadata_Well = Image_Metadata_Well,
+    Metadata_Site = Image_Metadata_Site,
+    Metadata_Channel = Class
+  ) %>% 
+  mutate(Class = "Debris", .before = "Metadata_Plate")
+```
+
+These 7 sites don't have measurements transferred over because they had multiple labels, which was filtered out when writing `qc_annotations.parquet`
+
+```{r}
+debris_images %>%
+  anti_join(
+    broad_qc %>% filter(Metadata_Source == "user") ,
+    by = c(
+      "Metadata_Plate",
+      "Metadata_Well",
+      "Metadata_Site",
+      "Metadata_Channel"
+    )
+  )
+```
+
+
+```{r}
+broad_qc <-
+  bind_rows(
+    broad_qc %>% filter(!(Class == "Debris" & Metadata_Source == "user")),
+    broad_qc %>% filter((Class == "Debris" & Metadata_Source == "user")) %>%
+      inner_join(
+        debris_images,
+        by = c(
+          "Class",
+          "Metadata_Plate",
+          "Metadata_Well",
+          "Metadata_Site",
+          "Metadata_Channel"
+        )
+      ),
+  )
+```
+
+
+```{r}
+broad_qc %>%
+  filter(Metadata_Source == "cpa" &
+           Metadata_Plate == "Plate3_PCO_6ch_4site_10XPA_Crestz") %>%
+  count(Class)
+```
+
+Debris counts will be 201 instead of 208 because 7 got dropped because of duplicate labels
+
+```{r}
+broad_qc %>%
+  filter(Metadata_Source == "user") %>%
+  group_by(Metadata_Partner, Class) %>%
+  tally(name = "n_images") 
+```
+
+# Partners 
+
+```{r eval=FALSE}
+partner_qc <- 
+  read_csv("input/2021_04_16_QCImages_QC_Image.csv.gz", guess_max = Inf)
+
+partner_qc %>% 
+  arrow::write_parquet("input/2021_04_16_QCImages_QC_Image.parquet")
+```
+
+
+```{r}
+partner_qc <-
+  arrow::read_parquet("input/2021_04_16_QCImages_QC_Image.parquet")
+```
+
+
+```{r}
+partner_qc <-
+  partner_qc %>% 
+  select(Metadata_FileLocation, matches("^ImageQuality_")) %>%
+  rename_with(~ str_remove(., "_DNA"), .cols = matches("_DNA"))
+```
+
+
+```{r}
+broad_features <- 
+  names(broad_qc) %>% str_subset("ImageQuality_")
+
+partner_features <- 
+  names(partner_qc) %>% str_subset("ImageQuality_")
+
+stopifnot(all(partner_features == partner_features))
+```
+
+
+```{r}
+partner_annotations_with_metadata <- 
+  read_csv("input/partner_annotations_with_metadata.csv", col_types = cols()) %>%
+  mutate(Metadata_FileLocation = 
+           str_remove(`Image Path`, "/dgx1nas1/cellpainting-datasets/2019_07_11_JUMP_CP_pilots/"),
+         .before = "Partner") %>%
+  select(-`Image Path`) %>%
+  rowwise() %>%
+  mutate(Metadata_FileLocation = URLdecode(Metadata_FileLocation)) %>%
+  ungroup()
+```
+
+
+```{r}
+partner_qc <-
+  partner_qc %>%
+  mutate(
+    Metadata_FileLocation = Metadata_FileLocation %>%
+      str_remove("file:///D:/2019_07_11_JUMP-CP-pilots/") %>%
+      str_replace("Ksilink%20-%20U2OS", "Ksilink_U2OS") %>%
+      str_replace("Ksilink%20-%20WT004", "Ksilink_WT004")
+  ) %>%
+  rowwise() %>%
+  mutate(Metadata_FileLocation = URLdecode(Metadata_FileLocation)) %>%
+  ungroup()
+```
+
+
+```{r}
+partner_qc <-
+  partner_annotations_with_metadata %>%
+  inner_join(partner_qc, by = "Metadata_FileLocation")
+```
+
+
+Merck channel mapping
+
+W1: Cy5: MitoTracker (Mitochondria)
+W2: Texas Red: Phalloidin (Actin)
+W3: Cy3: WGA/Syto-14 (Golgi/Nucleolus)
+W4: FITC: Concanavalin A (ER)
+W5: DAPI: Nuclei
+
+```{r}
+partner_qc <-
+  partner_qc %>%
+  mutate(
+    Channel = 
+      case_when(
+        Channel == "w1" ~ "Mito",
+        Channel == "w2" ~ "Actin",
+        Channel == "w3" ~ "RNA_Golgi",
+        Channel == "w4" ~ "ER",
+        Channel == "w5" ~ "DNA",
+        TRUE ~ Channel
+      )
+  )
+```
+
+
+```{r}
+partner_qc <- 
+  partner_qc %>% 
+  mutate(Metadata_Source = "user",
+         Metadata_Site = -1) %>%
+  select(Class,
+         Metadata_Source,
+         Metadata_Partner = Partner,
+         Metadata_Plate = Plate,
+         Metadata_Well = Well,
+         Metadata_Site,
+         Metadata_Channel = Channel,
+         Metadata_FileLocation,
+         matches("ImageQuality_"))
+```
+
+
+```{r}
+partner_qc %>%
+  filter(Metadata_Source == "user") %>%
+  count(Class, Metadata_Partner)
+```
+
+
+```{r}
+partner_qc %>%
+  filter(Metadata_Source == "user") %>%
+  group_by(Metadata_Partner, Class) %>%
+  tally(name = "n_images") %>%
+  ggplot(aes(Metadata_Partner, n_images)) +
+  geom_col() +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2), drop = FALSE) +
+  geom_label(aes(label = n_images)) +
+  facet_grid( ~ Class, space = "free", scales = "free_x") 
+```
+
+# Combine 
+
+```{r}
+combined_qc <-
+  bind_rows(
+    broad_qc,
+    partner_qc
+  )
+```
+
+
+```{r}
+combined_qc %>%
+  arrow::write_parquet("output/qc_features_annotations_full.parquet")
+```
+

@@ -1,0 +1,284 @@
+---
+title: "Inspect annotation"
+output: html_notebook
+---
+
+```{r}
+library(glue)
+library(tidyverse)
+```
+
+
+```{sh}
+setname=DavidPearlQCFixed
+rm -rf input/${setname}
+mkdir input/${setname}
+unzip input/${setname}.zip -d input/${setname}
+
+setname=ErinQC
+rm -rf input/${setname}
+mkdir input/${setname}
+unzip input/${setname}.zip -d input/${setname}
+```
+
+
+```{r}
+read_annot_df <- function(setname) {
+  parquet_file <- glue::glue("input/{setname}.parquet")
+  
+  df <-
+    list.files(glue("input/{setname}/"),
+               full.names = T,
+               pattern = "*.csv") %>%
+    map_df(function(filename) {
+      read_csv(
+        filename,
+        col_types = cols(Image_Metadata_Plate = col_character(), PlateID = col_character())
+      ) %>%
+        mutate(filename = tools::file_path_sans_ext(basename(filename)))
+    })
+  
+  df <-
+    df %>%
+    mutate(Image_Metadata_Well =
+             ifelse(
+               is.na(Image_Metadata_Well),
+               Image_Metadata_Well_x,
+               Image_Metadata_Well
+             ))
+  
+  # get a file name column that's present in all subsets
+  any_filename <-
+    df %>%
+    select(matches("Image_URL_")) %>%
+    summarise(across(everything(), ~ any(is.na(.)))) %>%
+    pivot_longer(everything()) %>%
+    filter(!value) %>%
+    slice(1) %>%
+    pull(name)
+  
+  # get a width column that's present in all subsets
+  any_width <-
+    df %>%
+    select(matches("Image_Width_")) %>%
+    summarise(across(everything(), ~ any(is.na(.)))) %>%
+    pivot_longer(everything()) %>%
+    filter(!value) %>%
+    slice(1) %>%
+    pull(name)
+  
+  # report number of channels by counting the number of non-NA Image_URL_ columns
+  n_channels <-
+    df %>%
+    select(Image_Metadata_Plate, matches("Image_URL_")) %>%
+    select(-matches("BrightField|Brightfield")) %>%
+    group_by(Image_Metadata_Plate) %>%
+    summarise(across(everything(), ~ sum(is.na(.))), .groups = "keep") %>%
+    pivot_longer(-Image_Metadata_Plate) %>%
+    filter(value < 5) %>%
+    count(name = "n_channels")
+  
+  n_sites <-
+    df %>%
+    group_by(Image_Metadata_Plate) %>%
+    tally(name = "n_sites")
+  
+  df <-
+    df %>% mutate(is_nd2 = str_detect(.data[[any_filename]], "nd2"))
+  
+  df <- df %>% mutate(image_width = .data[[any_width]])
+  
+  df <- df %>% mutate(setname = setname)
+  
+  df <-
+    df %>% inner_join(n_channels, by = c("Image_Metadata_Plate"))
+  
+  df <- df %>% inner_join(n_sites, by = c("Image_Metadata_Plate"))
+  
+  df <- df %>% mutate(n_images = n_sites * n_channels)
+  
+  if ("UserAnnotation_Ded" %in% names(df)) {
+    df <-
+      df %>%
+      mutate(UserAnnotation_Ded = replace_na(UserAnnotation_Ded, 0)) %>%
+      mutate(UserAnnotation_Empty = ifelse(UserAnnotation_Empty + UserAnnotation_Ded > 0, 1, 0))
+  }
+  
+  if ("CPAScore_DedImageCount" %in% names(df)) {
+    df <-
+      df %>%
+      mutate(CPAScore_DedImageCount = replace_na(CPAScore_DedImageCount, 0)) %>%
+      mutate(
+        CPAScore_EmptyImageCount = ifelse(CPAScore_EmptyImageCount + CPAScore_DedImageCount > 0, 1, 0)
+      )
+  }
+  df <-
+    df %>%
+    select(
+      setname,
+      filename,
+      is_nd2,
+      n_channels,
+      n_sites,
+      n_images,
+      image_width,
+      Image_Metadata_Plate,
+      Image_Metadata_Well,
+      Image_Metadata_Site,
+      matches("Image_URL_"),
+      matches("Image_ImageQuality"),
+      CPAScore_DebrisImageCount,
+      UserAnnotation_Debris,
+      CPAScore_EmptyImageCount,
+      UserAnnotation_Empty,
+      CPAScore_BlurryImageCount,
+      UserAnnotation_Blurry
+    ) %>%
+    mutate(across(matches("CPAScore|UserAnnotation"), ~ replace_na(., 0))) %>%
+    mutate(
+      UserAnnotation_Good = as.integer(
+        UserAnnotation_Debris + UserAnnotation_Empty + UserAnnotation_Blurry == 0
+      )
+    ) %>%
+    mutate(
+      CPAScore_GoodImageCount = as.integer(
+        CPAScore_DebrisImageCount + CPAScore_EmptyImageCount + UserAnnotation_Blurry == 0
+      )
+    )
+  
+  df %>% arrow::write_parquet(parquet_file)
+  
+  df
+}
+```
+
+
+```{r}
+df1 <- read_annot_df("DavidPearlQCFixed")
+df2 <- read_annot_df("ErinQC")
+```
+
+
+```{sh}
+setname=DavidPearlQCFixed
+rm -rf input/${setname}
+
+setname=ErinQC
+rm -rf input/${setname}
+```
+
+
+```{r}
+df <- 
+  bind_rows(
+    df1,
+    df2
+  )
+```
+
+Drop multi-label when counting
+
+```{r}
+df %>%
+  filter(!(UserAnnotation_Blurry + UserAnnotation_Debris + UserAnnotation_Empty < 2)) %>%
+  count()
+```
+```{r}
+df <- 
+  df %>%
+  filter(UserAnnotation_Blurry + UserAnnotation_Debris + UserAnnotation_Empty < 2)
+```
+
+```{r}
+df_counts <-
+  df %>%
+  select(-matches("Image_ImageQuality|Image_URL_")) %>%
+  filter(UserAnnotation_Blurry + UserAnnotation_Debris + UserAnnotation_Empty < 2) %>%
+  group_by(is_nd2,
+           setname,
+           filename,
+           n_channels,
+           n_sites,
+           n_images,
+           image_width,
+           Image_Metadata_Plate) %>%
+  summarise(across(matches("Empty|Debris|Blurry|Good"), sum), .groups = "keep") %>%
+  select(
+    is_nd2,
+    setname,
+    filename,
+    n_channels,
+    n_sites,
+    n_images,
+    image_width,
+    Image_Metadata_Plate,
+    matches("UserAnnotation|CPAScore")
+  ) %>%
+  rename_with(~ str_remove(., "UserAnnotation_"), .cols = matches("UserAnnotation_")) %>%
+  rename_with(~ str_remove(., "ImageCount"), .cols = matches("ImageCount")) %>%
+  select(
+    is_nd2,
+    setname,
+    filename,
+    n_channels,
+    n_sites,
+    n_images,
+    image_width,
+    Image_Metadata_Plate,
+    matches("CPAScore_"),
+    everything()
+  )
+
+df_counts <-
+  bind_rows(
+    df_counts %>%  select(
+      is_nd2,
+      setname,
+      filename,
+      n_channels,
+      n_sites,
+      n_images,
+      image_width,
+      Image_Metadata_Plate,
+      Debris,
+      Empty,
+      Blurry,
+      Good
+    ) %>%
+      mutate(annot_type = "user"),
+    df_counts %>% select(
+      is_nd2,
+      setname,
+      filename,
+      n_channels,
+      n_sites,
+      n_images,
+      image_width,
+      Image_Metadata_Plate,
+      matches("CPAScore")
+    ) %>%
+      rename_with( ~ str_remove(., "CPAScore_"), .cols = matches("CPAScore_")) %>%
+      mutate(annot_type = "cpa")
+  )
+
+# factor in number of channels
+
+df_counts <-
+  df_counts %>%
+  mutate(across(all_of(c("Debris", "Empty", "Blurry", "Good")), ~ . * n_channels)) %>%
+  ungroup()
+```
+
+
+```{r}
+df %>% 
+  arrow::write_parquet("output/qc_annotations.parquet")
+```
+
+
+```{r}
+df_counts %>% 
+  write_csv("output/qc_annotations_counts.csv")
+```
+
+

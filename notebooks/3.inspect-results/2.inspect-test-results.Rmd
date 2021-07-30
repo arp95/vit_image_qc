@@ -1,0 +1,194 @@
+---
+title: "Inspect test results"
+output: html_notebook
+params:
+  dataset: Stain5_CondC_PE_Standard
+---
+
+```{r}
+library(glue)
+library(tidyverse)
+```
+
+
+```{r}
+dataset <- params$dataset
+```
+
+
+```{r}
+test_dataset <- arrow::read_parquet(glue("input/{dataset}/test_dataset.parquet"))
+```
+
+```{r}
+test_dataset %>% 
+  mutate(all_classes = good + blurry + debris + empty) %>%
+  filter(!between(all_classes, 0.995, 1.005))
+```
+```{r}
+test_dataset_long <-
+  test_dataset %>%
+  select(classifier, plate, image, r, c, f, ch, good:debris) %>%
+  pivot_longer(-c(classifier, plate, image, r, c, f, ch),
+               names_to = "category",
+               values_to = "prob")
+```
+
+
+```{r}
+get_predictions <- function(prob_thresh = 0) {
+  test_dataset_long %>%
+    group_by(classifier, plate, image, r, c, f, ch) %>%
+    filter(prob == max(prob)) %>%
+    mutate(category = ifelse(prob > prob_thresh, category, "X")) %>%
+    ungroup()
+}
+```
+
+
+```{r}
+p <- 
+  test_dataset_long %>%
+  ggplot(aes(prob, fill = classifier)) + 
+  geom_histogram(bins = 50, position = "identity", alpha = 0.6) + 
+  scale_x_continuous(labels = scales::percent) +
+  facet_grid(category~plate)
+
+p
+
+ggsave(glue("output/{dataset}/class_histograms.png"), p,  width = 9, height = 5)
+```
+
+
+```{r}
+plot_predictions <- function(df) {
+  df %>%
+    mutate(category = as.factor(category)) %>%
+    mutate(classifier = as.factor(classifier)) %>%
+    count(classifier, plate, ch, category, .drop = FALSE) %>%
+    group_by(classifier, plate, ch) %>%
+    mutate(frac = n / sum(n)) %>%
+    ggplot(aes(category, frac, fill = classifier)) +
+    geom_col(position = position_dodge(width = .5), width = 0.5) +
+    geom_label(
+      aes(
+        label = scales::percent(frac, accuracy = 1.0),
+        group = classifier
+      ),
+      size = 2,
+      fill = "white",
+      label.padding = unit(0.1, "lines"),
+      position = position_dodge(width = .5)
+    ) +
+    scale_fill_discrete(drop = FALSE) +
+    scale_x_discrete(guide = guide_axis(n.dodge = 2), drop = FALSE) +
+    scale_y_continuous(labels = scales::percent) +
+    facet_grid(ch ~ plate, labeller = labeller(.rows = label_both))
+}
+```
+
+
+```{r fig.width=18, fig.height=5}
+prob_thresh <- 0
+
+predictions <- get_predictions(prob_thresh)
+
+p <- plot_predictions(predictions) +
+  ggtitle(glue("Predictions using prob. threshold = {prob_thresh}"))
+
+p
+
+ggsave(
+  glue("output/{dataset}/class_props_{prob_thresh}.png"),
+  p,
+  width = 18,
+  height = 5
+)
+```
+
+
+```{r fig.width=18, fig.height=5}
+prob_thresh <- 0.6
+
+p <- plot_predictions(get_predictions(prob_thresh)) +
+  ggtitle(glue("Predictions using prob. threshold = {prob_thresh}"))
+
+p
+
+ggsave(
+  glue("output/{dataset}/class_props_{prob_thresh}.png"),
+  p,
+  width = 18,
+  height = 5
+)
+```
+
+
+```{r}
+prob_thresh <- 0
+
+predictions <- get_predictions(prob_thresh)
+```
+
+
+```{r}
+p <- 
+  predictions %>% 
+  filter(category == "debris") %>% 
+  ggplot(aes(prob, color = classifier)) + 
+  stat_ecdf() +
+  geom_vline(xintercept = 0.5, color = "red", alpha = 0.5) +
+  scale_x_continuous(labels = scales::percent) +
+  facet_grid(ch ~ plate) +
+  ggtitle("ECDF of probabilites for images labeled debris",
+          subtitle = "Labels assigned using argmax")
+
+p
+
+ggsave(
+  glue("output/{dataset}/debris_ecdf.png"),
+  p,
+  width = 8,
+  height = 5
+)
+```
+
+
+```{r}
+p <- 
+  predictions %>% 
+  filter(category == "debris") %>% 
+  ggplot(aes(prob, fill = classifier)) + 
+  geom_histogram(bins = 50, alpha = 0.7, position = "identity") +
+  geom_vline(xintercept = 0.5, color = "red", alpha = 0.5) +
+  scale_x_continuous(labels = scales::percent) +
+  facet_grid(ch ~ plate) +
+  ggtitle("Distribution of probabilites for images labeled debris",
+          subtitle = "Labels assigned using argmax")
+
+p
+
+ggsave(
+  glue("output/{dataset}/debris_hist.png"),
+  p,
+  width = 8,
+  height = 5
+)
+```
+
+
+```{r fig.width=18, fig.height=5}
+prob_thresh <- 0.97
+
+p <- plot_predictions(get_predictions(prob_thresh)) +
+  ggtitle(glue("Predictions using prob. threshold = {prob_thresh}"))
+
+p
+
+ggsave(
+  glue("output/{dataset}/class_props_{prob_thresh}.png"),
+  p,
+  width = 18,
+  height = 5
+)
+```

@@ -1,0 +1,315 @@
+---
+title: "Plot annotation counts"
+output: html_notebook
+---
+
+```{r}
+library(glue)
+library(tidyverse)
+```
+
+
+```{r}
+df_counts <-  read_csv("output/qc_annotations_counts.csv")
+```
+
+
+```{r}
+df_counts_long <-
+  df_counts %>%
+  pivot_longer(
+    c(Debris, Empty, Blurry, Good),
+    names_to = "category",
+    values_to = "count"
+  )
+```
+
+
+
+```{r rows.print=50}
+df_counts_long_report <- 
+  df_counts_long %>%
+  filter(category != "Good") %>%
+  group_by(setname,
+           filename,
+           is_nd2,
+           Image_Metadata_Plate,
+           n_sites,
+           n_channels,
+           n_images,
+           image_width,
+           annot_type) %>%
+  summarize(count = sum(count), .groups = "keep") %>%
+  pivot_wider(names_from = "annot_type",
+              values_from = "count",
+              names_prefix = "count_") %>%
+  mutate(
+    frac_user = round(count_user / n_images, 2),
+    frac_cpa = round(count_cpa / n_images, 2)
+  ) %>%
+  arrange(setname, is_nd2, Image_Metadata_Plate, n_sites, n_channels)
+
+df_counts_long_report
+
+df_counts_long_report %>%
+  write_csv("output/qc_annotations_counts_report.csv")
+```
+
+
+```{r fig.height=6}
+df_counts_long %>% 
+  distinct(Image_Metadata_Plate, filename, n_images, is_nd2) %>%
+  ggplot(aes(paste(filename, Image_Metadata_Plate, sep = ":"), n_images)) +
+  geom_col() +
+  xlab("Plate") +
+  facet_grid(
+    is_nd2 ~ .,
+    labeller = labeller(.rows = label_both),
+    scales = "free_y",
+    space = "free"
+  ) + coord_flip()
+```
+
+
+```{r fig.height=6}
+df_counts_long %>% 
+  distinct(Image_Metadata_Plate, filename, n_sites, is_nd2) %>%
+  ggplot(aes(paste(filename, Image_Metadata_Plate, sep = ":"), n_sites)) +
+  geom_col() +
+  xlab("Plate") +
+  facet_grid(
+    is_nd2 ~ .,
+    labeller = labeller(.rows = label_both),
+    scales = "free_y",
+    space = "free"
+  ) + coord_flip()
+```
+
+
+```{r fig.height=6, fig.width=10}
+df_counts_long %>% 
+  filter(category != "Good") %>%
+  ggplot(aes(paste(filename, Image_Metadata_Plate, sep = ":"), count / n_images, fill = category)) +
+  geom_col() +
+  xlab("Plate") +
+  scale_y_continuous(labels = ~scales::percent(., accuracy = 1)) +
+  facet_grid(
+    is_nd2 ~ annot_type,
+    labeller = labeller(.rows = label_both),
+    scales = "free_y",
+    space = "free"
+  ) + 
+  coord_flip()
+```
+```{r fig.height=10, fig.width=10}
+df_counts_long %>% 
+  filter(category != "Good") %>%
+  ggplot(aes(annot_type, count / n_images, fill = category)) +
+  geom_col() +
+  scale_y_continuous(labels = ~scales::percent(., accuracy = 1)) +
+  facet_wrap(~Image_Metadata_Plate, ncol = 5, scales = "free_y") +
+  theme(strip.text = element_text(size = 7))
+```
+
+```{r}
+df_count_total <-
+  df_counts %>% 
+  group_by(is_nd2, annot_type) %>%
+  summarize(across(one_of("Debris", "Empty", "Blurry", "Good"), sum), .groups = "keep") %>%
+  pivot_longer(-c(is_nd2, annot_type),  names_to = "category", values_to = "count") 
+```
+
+
+```{r}
+df_counts_long %>%
+  filter(category != "Good") %>%
+  ggplot(aes(category, count, fill = Image_Metadata_Plate)) +
+  geom_col() +
+  geom_label(
+    data = df_count_total %>%   filter(category != "Good"),
+    aes(category, count,
+        label = count),
+    fill = "white"
+  ) +
+  theme(legend.position = "none") +
+  ggtitle("Number of images per category", subtitle = "Color indicates plate") +
+  facet_grid(is_nd2 ~ annot_type, labeller = labeller(.rows = label_both))
+```
+
+Also plot "Good" class.
+
+We should only consider the CPA version of "Good" to be conservative because of this:
+
+>  The protocol was for the scorers to hand-check all of the CPA non-Good predictions, but not the CPA Good predictions
+
+
+```{r}
+df_counts_long %>%
+  filter(category == "Good") %>%
+  ggplot(aes(category, count, fill = Image_Metadata_Plate)) +
+  geom_col() +
+  geom_label(
+    data = df_count_total %>%   filter(category == "Good"),
+    aes(category, count,
+        label = count),
+    fill = "white"
+  ) +
+  theme(legend.position = "none") +
+  ggtitle("Number of images per category", subtitle = "Color indicates plate.") +
+  facet_grid(is_nd2 ~ annot_type, labeller = labeller(.rows = label_both))
+```
+
+
+```{r}
+arpit_counts <-
+  df_counts_long %>%
+  filter(filename != "Classifier_Nikon_10X_Batch9-Pearl") %>%
+  filter(!(category == "Blurry" & image_width <= 2000)) %>%
+  filter(!is_nd2)
+
+arpit_counts_summary <- 
+  arpit_counts %>%
+  group_by(annot_type, category) %>%
+  summarize(count = sum(count), .groups = "keep") %>%
+  pivot_wider(names_from = "annot_type", values_from = "count", names_prefix = "count_")
+
+arpit_counts_summary %>%
+  write_csv("output/arpit_counts_summary.csv")
+
+arpit_counts %>%
+  filter(category != "Good") %>%
+  ggplot(aes(category, count, fill = Image_Metadata_Plate)) +
+  geom_col() +
+  geom_label(
+    data =
+      arpit_counts %>%
+      group_by(annot_type, category) %>%
+      summarize(count = sum(count), .groups = "keep") %>%
+      filter(category != "Good"),
+    aes(category, count,
+        label = count),
+    fill = "white"
+  ) +
+  theme(legend.position = "none") +
+  ggtitle("Number of images per category", subtitle = "Color indicates plate") +
+  facet_grid(is_nd2 ~ annot_type, labeller = labeller(.rows = label_both))
+```
+
+Total counts available are shown below
+
+Recap: we should only consider the CPA version of "Good" to be conservative because of this:
+
+>  The protocol was for the scorers to hand-check all of the CPA non-Good predictions, but not the CPA Good predictions
+
+```{r}
+df_counts_long %>%
+  group_by(annot_type, category) %>%
+  summarize(count = sum(count), .groups = "keep") %>%
+  pivot_wider(names_from = "annot_type", values_from = "count", names_prefix = "count_")
+```
+
+
+```{r}
+df_counts %>%
+  pivot_longer(c(Debris, Empty, Blurry, Good),
+               names_to = "category",
+               values_to = "count") %>%
+  pivot_wider(names_from = "annot_type",
+              values_from = "count",
+              names_prefix = "count_") %>%
+  filter(category != "Good") %>%
+  ggplot(aes(count_user / n_images, count_cpa / n_images)) +
+  geom_point(aes(color = count_user > count_cpa)) +
+  facet_wrap( ~ category) +
+  geom_abline(slope = 1) +
+  coord_equal() +
+  scale_x_continuous(labels = ~scales::percent(., accuracy = 1)) +
+  scale_y_continuous(labels = ~scales::percent(., accuracy = 1)) +
+  ggtitle("Counts of images tagged as belonging to each class",
+          subtitle = "Each channel is counted separately") +
+  theme(legend.position = "bottom")
+```
+```{r fig.height=10, fig.width=13}
+df_counts %>%
+  pivot_longer(c(Debris, Empty, Blurry, Good),
+               names_to = "category",
+               values_to = "count") %>%
+  pivot_wider(names_from = "annot_type",
+              values_from = "count",
+              names_prefix = "count_") %>%
+mutate(cpa_is_zero = count_cpa == 0) %>%
+mutate(count_cpa = count_cpa + .Machine$double.eps,
+         count_user = count_user + .Machine$double.eps,
+         ratio_user_to_cpa = count_user / count_cpa,
+         ratio_user_to_cpa = ifelse(ratio_user_to_cpa > 2, Inf, ratio_user_to_cpa))  %>%
+  filter(category != "Good") %>%
+  ggplot(aes(paste(filename, Image_Metadata_Plate, sep = ":"), ratio_user_to_cpa)) +
+  geom_col(aes(fill = cpa_is_zero)) +
+  geom_label(aes(y = -.05, label = round(count_user, 0)), hjust = "right") +
+  xlab("Plate") +
+  ylim(c(-.5, 1.5)) +
+  facet_grid(
+    is_nd2 ~ category,
+    labeller = labeller(.rows = label_both),
+    scales = "free_y",
+    space = "free"
+  ) + 
+  geom_hline(yintercept = 0.85, color = "red", alpha = 0.5) +
+  geom_hline(yintercept = 1.15, color = "red", alpha = 0.5) +
+  coord_flip() + 
+  ggtitle("Ratio of User:CPA -labelled images", subtitle = "User-labeled counts are indicated with labels")
+```
+Debris annotations
+
+```{r}
+MyTrainingSet_5channel_urls <-
+  read_csv(
+    "input/debris_annotations/MyTrainingSet_5channel_urls.csv",
+    col_types = cols()
+  )
+```
+
+```{r}
+MyTrainingSet_5channel_urls %>% count()
+
+MyTrainingSet_5channel_urls %>%
+  distinct(Image_Metadata_Plate,
+           Image_Metadata_Well,
+           Image_Metadata_Site) %>%
+  count()
+```
+
+```{r}
+debris_counts <-
+  MyTrainingSet_5channel_urls %>%
+  distinct(Image_Metadata_Plate,
+           Image_Metadata_Well,
+           Image_Metadata_Site) %>%
+  count(Image_Metadata_Plate, name = "Debris_sites_annotated") %>%
+  inner_join(df_counts %>% filter(annot_type == "user"),
+             by = c("Image_Metadata_Plate"))
+
+
+debris_counts %>%
+  ggplot(aes(paste(filename, Image_Metadata_Plate, sep = ":"), Debris_sites_annotated)) + 
+  geom_col() + 
+  xlab("Plate") +
+  coord_flip()
+
+debris_counts %>%
+  ggplot(aes(paste(filename, Image_Metadata_Plate, sep = ":"), Debris_sites_annotated/sum(Debris_sites_annotated))) + 
+  geom_col() + 
+  xlab("Plate") +
+  ylab("Percentage of total count") +
+  scale_y_continuous(labels = ~scales::percent(., accuracy = 1)) +
+  coord_flip()
+```
+
+
+```{r rows.print=20}
+debris_counts %>%
+  mutate(Debris_sites = Debris / n_channels) %>%
+  mutate(diff = Debris_sites_annotated - Debris_sites) %>%
+  select(Image_Metadata_Plate, Debris_sites_annotated, Debris_sites, diff)
+```
+

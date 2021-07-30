@@ -19,7 +19,8 @@ is_pretrained = True
 image_size = 1024
 val_path = "/dgx1nas1/cellpainting-datasets/2019_07_11_JUMP_CP_pilots/2021_03_03_Stain5_CondC_PE_Standard/images/BR00120277__2021-02-20T07_02_46-Measurement1/Images"
 model_path = "/home/jupyter-arpit@broadinstitu-ef612/qc_bestmodel_baseline.pth"
-output_path = "/home/jupyter-arpit@broadinstitu-ef612/test_baseline_5.csv"
+output_path = "/home/jupyter-arpit@broadinstitu-ef612/test_baseline_batch.csv"
+gpu_on_dgx = "cuda:4"
 
 
 # create PyTorch dataset class and create val_data and the val_loader
@@ -47,7 +48,7 @@ model.fc = torch.nn.Sequential(
     torch.nn.Softmax()
 )
 
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+device = torch.device(gpu_on_dgx if torch.cuda.is_available() else "cpu")
 model.to(device)
 model.load_state_dict(torch.load(model_path, map_location=device))
 

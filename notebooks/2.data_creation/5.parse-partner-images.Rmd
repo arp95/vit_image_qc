@@ -1,0 +1,234 @@
+---
+title: "Parse partner images"
+output: html_notebook
+---
+
+```{r message=FALSE}
+library(glue)
+library(tidyverse)
+```
+
+```{r}
+set.seed(42)
+```
+
+```{r}
+images <- read_csv("input/partner_annotations.csv", col_types = cols(.default = col_character()))
+```
+
+```{r}
+images <-
+  images %>%
+  mutate(filename = tools::file_path_sans_ext(basename(`Image Path`)))
+```
+
+
+```{r}
+images %>%
+  filter(Partner == "Servier") %>%
+  distinct(filename, Class)
+```
+
+
+```{r}
+images <- 
+  images %>%
+  filter(Partner != "Servier")
+```
+
+
+```{r}
+images <- 
+  images %>%
+  filter(!(Partner == "Ksilink" & filename %in% letters))
+```
+
+
+```{r}
+images %>%
+  group_by(Partner) %>%
+  slice(1) %>%
+  select(filename)
+```
+
+```{r}
+images_1 <- 
+  images %>%
+  filter(Partner %in% c("AstraZeneca", "Bayer", "Ksilink", "Merck"))
+
+images_2 <- 
+  images %>%
+  filter(Partner %in% c("MPI"))
+
+images_3 <- 
+  images %>%
+  filter(Partner %in% c("Pfizer"))
+
+```
+
+```{r}
+metadata_cols <- c("Plate", "Well", "Channel")
+```
+
+```{r}
+images_1 %>%
+  group_by(Partner) %>%
+  sample_n(2) %>%
+  select(filename)
+```
+
+```{r}
+regex_1 <- "([a-zA-Z0-9\\- ]+)_([A-Z0-9]+)_[a-zA-Z0-9]+_([a-zA-Z0-9\\-]+)"
+
+images_1 %>%
+  group_by(Partner) %>%
+  sample_n(2) %>%
+  select(filename) %>% 
+  extract(filename, metadata_cols, regex_1) %>%
+  mutate(Channel = ifelse(str_sub(Channel, 1, 1) != "w", Channel, str_sub(Channel, 1, 2)))
+```
+
+
+```{r}
+images_2 %>%
+  group_by(Partner) %>%
+  sample_n(5) %>%
+  select(filename)
+```
+
+
+```{r}
+regex_2 <- "([A-Z0-9\\-]+_[A-Z0-9a-z_]+)_([A-Z0-9]+)_s[0-9]_([A-Za-z]+)"
+
+images_2 %>%
+  group_by(Partner) %>%
+  sample_n(10) %>%
+  select(filename) %>% 
+  extract(filename, metadata_cols, regex_2)
+```
+```{r}
+images_3 %>%
+  group_by(Partner) %>%
+  sample_n(5) %>%
+  select(filename)
+```
+
+
+```{r}
+regex_3 <-  "([A-Z0-9]+) \\[Well ([0-9]+), Field [0-9]+\\]_([A-Za-z]+)"
+
+images_3 %>%
+  group_by(Partner) %>%
+  sample_n(10) %>%
+  select(filename) %>% 
+  extract(filename, metadata_cols, regex_3)
+```
+
+
+```{r}
+images <-
+  bind_rows(
+    images_1 %>% extract(filename, metadata_cols, regex_1) %>%
+      mutate(Channel = ifelse(
+        str_sub(Channel, 1, 1) != "w", Channel, str_sub(Channel, 1, 2)
+      )),
+    images_2 %>% extract(filename, metadata_cols, regex_2),
+    images_3 %>% extract(filename, metadata_cols, regex_3)
+  )
+```
+
+```{r}
+images %>%
+  distinct(Partner, Plate)
+```
+```{r}
+images %>%
+  distinct(Partner, Well)
+```
+
+```{r}
+images %>%
+  distinct(Partner, Channel)
+```
+```{r}
+images %>%
+  group_by(Partner, Class) %>%
+  tally(name = "n_images") %>%
+  ggplot(aes(Partner, n_images)) +
+  geom_col() +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2), drop = FALSE) +
+  geom_label(aes(label = n_images)) +
+  facet_grid( ~ Class, space = "free", scales = "free_x") 
+```
+
+
+```{r}
+images %>%
+  group_by(Partner, Plate, Class) %>%
+  tally(name = "n_images") %>%
+  ggplot(aes(Class, n_images, color = Plate)) + geom_col() + facet_wrap(~Partner) +
+  theme(legend.position = "none") +
+  ggtitle("Color indicates plate")
+```
+
+
+```{r}
+images %>%
+  distinct(Partner, Plate, Class) %>%
+  group_by(Partner, Class) %>%
+  tally(name = "n_plates") %>%
+  ggplot(aes(Class, n_plates)) + 
+  geom_col() + 
+  facet_wrap(~Partner) +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2), drop = FALSE) +
+  geom_label(aes(label = n_plates))
+```
+
+
+```{r}
+images %>%
+  group_by(Partner, Channel, Class) %>%
+  tally(name = "n_images") %>%
+  ggplot(aes(Class, n_images, color = Channel)) + geom_col() + facet_wrap(~Partner) +
+  theme(legend.position = "none") +
+  ggtitle("Color indicates channel")
+```
+
+
+```{r}
+images %>%
+  distinct(Partner, Channel, Class) %>%
+  group_by(Partner, Class) %>%
+  tally(name = "n_channels") %>%
+  ggplot(aes(Class, n_channels)) + 
+  geom_col() + 
+  facet_wrap(~Partner) +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2), drop = FALSE) +
+  geom_label(aes(label = n_channels))
+```
+```{r}
+images %>% 
+  distinct(Partner, Plate, Well, Channel, Class) %>% 
+  group_by(Partner, Plate, Well, Class) %>% 
+  tally(name = "n_channels") %>% 
+  ungroup %>% 
+  count(Class, n_channels, name = "n_wells") %>% 
+  select(Class, n_wells, n_channels)
+```
+
+```{r}
+images %>% 
+  filter(Class == "Debris") %>%
+  distinct(Partner, Plate, Well, Channel) %>% 
+  group_by(Partner, Plate, Well) %>% 
+  tally(name = "n_channels") %>% 
+  ungroup %>% 
+  count(Partner, n_channels, name = "n_wells") %>% 
+  select(Partner, n_wells, n_channels)
+```
+
+```{r}
+images %>% 
+  write_csv("input/partner_annotations_with_metadata.csv")
+```
+

@@ -1,0 +1,65 @@
+Set,Partner,Class,Count
+train,Bayer,Good,125
+train,Merck,Good,82
+train,AstraZeneca,Good,125
+train,Ksilink,Good,65
+train,Servier,Good,8
+train,MPI,Good,45
+train,Pfizer,Good,40
+train,Broad Institute,Good,70
+train,Bayer,Blurry,5
+train,Merck,Blurry,0
+train,AstraZeneca,Blurry,350
+train,Ksilink,Blurry,145
+train,Servier,Blurry,0
+train,MPI,Blurry,0
+train,Pfizer,Blurry,0
+train,Broad Institute,Blurry,100
+train,Bayer,Empty,0
+train,Merck,Empty,0
+train,AstraZeneca,Empty,0
+train,Ksilink,Empty,0
+train,Servier,Empty,0
+train,MPI,Empty,0
+train,Pfizer,Empty,50
+train,Broad Institute,Empty,300
+train,Bayer,Debris,150
+train,Merck,Debris,155
+train,AstraZeneca,Debris,31
+train,Ksilink,Debris,25
+train,Servier,Debris,1
+train,MPI,Debris,90
+train,Pfizer,Debris,10
+train,Broad Institute,Debris,88
+validation,Bayer,Good,8
+validation,Merck,Good,10
+validation,AstraZeneca,Good,10
+validation,Ksilink,Good,15
+validation,Servier,Good,2
+validation,MPI,Good,15
+validation,Pfizer,Good,10
+validation,Broad Institute,Good,30
+validation,Bayer,Blurry,3
+validation,Merck,Blurry,0
+validation,AstraZeneca,Blurry,38
+validation,Ksilink,Blurry,38
+validation,Servier,Blurry,2
+validation,MPI,Blurry,0
+validation,Pfizer,Blurry,0
+validation,Broad Institute,Blurry,19
+validation,Bayer,Empty,0
+validation,Merck,Empty,0
+validation,AstraZeneca,Empty,0
+validation,Ksilink,Empty,0
+validation,Servier,Empty,0
+validation,MPI,Empty,0
+validation,Pfizer,Empty,6
+validation,Broad Institute,Empty,94
+validation,Bayer,Debris,16
+validation,Merck,Debris,22
+validation,AstraZeneca,Debris,8
+validation,Ksilink,Debris,25
+validation,Servier,Debris,0
+validation,MPI,Debris,7
+validation,Pfizer,Debris,2
+validation,Broad Institute,Debris,20

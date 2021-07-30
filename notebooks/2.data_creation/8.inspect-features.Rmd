@@ -1,0 +1,251 @@
+---
+title: "Inspect CellProfiler feature set"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(tidymodels)      # for the recipes package, along with the rest of tidymodels
+
+# Helper packages
+library(skimr)           # for variable summaries
+```
+
+
+```{r}
+df <-
+  arrow::read_parquet("output/qc_features_annotations_full.parquet") %>%
+  filter(Metadata_Source == "cpa")
+```
+
+
+```{r}
+class_list <- c("Good", "Blurry", "Empty")
+```
+
+
+```{r}
+bad_plates <-
+  tibble(
+    Metadata_Plate =
+      c(
+        "CP_Broad_Phenix_NC_BIN1_1Plane_P1",
+        "CP_Broad_Phenix_NC_BIN1_1Plane_P2",
+        "CP_Broad_Phenix_NC_BIN1_1Plane_P3",
+        "CP_Broad_Phenix_NC_BIN1_1Plane_P4",
+        "CP_Broad_Phenix_NC_BIN1_P1",
+        "CP_Broad_Phenix_NC_BIN1_P2",
+        "CP_Broad_Phenix_NC_BIN1_P3",
+        "CP_Broad_Phenix_NC_BIN1_P4"
+      )
+  )
+```
+
+
+```{r}
+df <-
+  df %>%
+  filter(Class %in% class_list) %>%
+  filter(Metadata_Partner == "Broad") %>%
+  anti_join(bad_plates) %>%
+  select(Class, Metadata_Plate, Metadata_Well, Metadata_Channel, matches("ImageQuality")) %>%
+  mutate_if(is.character, as.factor)
+```
+
+
+```{r}
+df <- 
+  df %>% 
+  group_by(Metadata_Plate, Class) %>%
+  tally() %>%
+  pivot_wider(names_from = "Class", values_from = "n") %>%
+  na.omit() %>% 
+  select(Metadata_Plate) %>%
+  inner_join(df)
+```
+
+```{r}
+df <- 
+  recipe(~., df) %>%
+  themis::step_downsample(Class, under_ratio = 1) %>%
+  prep() %>%
+  bake(new_data = NULL)
+```
+
+```{r}
+set.seed(555)
+data_split <- initial_split(df, prop = 3/4, strata = "Class")
+
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+```
+
+
+```{r}
+df %>% skim(Class, Metadata_Plate)
+```
+
+
+```{r}
+train_data %>% skim(Class, Metadata_Plate)
+```
+
+
+```{r}
+test_data %>% skim(Class, Metadata_Plate)
+```
+
+
+```{r}
+qc_rec <- 
+  recipe(Class ~ ., data = train_data) %>%
+  update_role(Metadata_Plate, Metadata_Well, Metadata_Channel, new_role = "ID") %>%
+  step_zv(all_predictors())
+```
+
+
+```{r}
+summary(qc_rec)
+```
+
+
+```{r}
+tune_spec <- 
+  decision_tree(
+    cost_complexity = tune(),
+    tree_depth = tune()
+  ) %>% 
+  set_engine("rpart") %>% 
+  set_mode("classification")
+
+tune_spec
+
+```
+```{r}
+tree_grid <- grid_regular(cost_complexity(),
+                          tree_depth(),
+                          levels = 5)
+
+tree_grid
+```
+
+```{r}
+set.seed(234)
+qc_folds <- vfold_cv(train_data)
+```
+
+
+```{r}
+set.seed(345)
+
+tree_wf <- workflow() %>%
+  add_model(tune_spec) %>%
+  add_recipe(qc_rec)
+
+tree_res <- 
+  tree_wf %>% 
+  tune_grid(
+    resamples = qc_folds,
+    grid = tree_grid
+    )
+
+#tree_res
+```
+
+
+```{r}
+tree_res %>% 
+  collect_metrics()
+```
+
+
+```{r}
+tree_res %>%
+  collect_metrics() %>%
+  mutate(tree_depth = factor(tree_depth)) %>%
+  ggplot(aes(cost_complexity, mean, color = tree_depth)) +
+  geom_line(size = 1.5, alpha = 0.6) +
+  geom_point(size = 2) +
+  facet_wrap(~ .metric, scales = "free", nrow = 2) +
+  scale_x_log10(labels = scales::label_number()) +
+  scale_color_viridis_d(option = "plasma", begin = .9, end = 0)
+```
+
+
+```{r}
+tree_res %>%
+  show_best("roc_auc")
+```
+
+
+```{r}
+best_tree <- tree_res %>%
+  select_by_pct_loss(tree_depth, metric = "roc_auc", limit = 5)
+
+best_tree
+```
+
+
+```{r}
+final_wf <- 
+  tree_wf %>% 
+  finalize_workflow(best_tree)
+
+final_wf
+```
+
+
+```{r}
+final_tree <- 
+  final_wf %>%
+  fit(data = train_data) 
+
+#final_tree
+```
+
+
+```{r}
+tree_fit <- final_tree %>% extract_fit_parsnip()
+rpart.plot::rpart.plot(tree_fit$fit)
+```
+
+
+```{r}
+library(vip)
+
+final_tree %>% 
+  pull_workflow_fit() %>% 
+  vip()
+```
+
+
+```{r}
+final_fit <- 
+  final_wf %>%
+  last_fit(data_split) 
+
+final_fit %>%
+  collect_metrics()
+```
+
+
+```{r}
+final_fit %>%
+  collect_predictions() %>% 
+  select(-.pred_class) %>%
+  roc_curve(Class, matches(".pred")) %>% 
+  autoplot()
+```
+
+```{r}
+confusion_matrix <- 
+  final_fit %>%
+  collect_predictions() %>%
+  conf_mat(Class, .pred_class) 
+
+confusion_matrix
+
+confusion_matrix %>%
+  summary()
+```
+

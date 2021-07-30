@@ -32,6 +32,8 @@ torch.cuda.manual_seed(1234)
 # dataset paths
 train_path = "/dgx1nas1/cellpainting-datasets/2019_07_11_JUMP_CP_pilots/train"
 val_path = "/dgx1nas1/cellpainting-datasets/2019_07_11_JUMP_CP_pilots/validation"
+results_dir = "/home/jupyter-arpit@broadinstitu-ef612/"
+gpu_on_dgx = "cuda:4"
 
 
 # hyperparameters
@@ -68,7 +70,7 @@ def get_config():
     return config
 
 # load model to gpu
-device = torch.device("cuda:4" if torch.cuda.is_available() else "cpu")
+device = torch.device(gpu_on_dgx if torch.cuda.is_available() else "cpu")
 model = VisionTransformer(config=get_config(), num_classes=output_classes, in_channels=1)
 model.to(device)
 
@@ -159,7 +161,7 @@ for epoch in range(1, num_epochs+50):
             best_metric = float(valid_accuracy)
             best_metric_epoch = epoch
             best_confusion_matrix = confusion_matrix
-            torch.save(model.state_dict(), "/home/jupyter-arpit@broadinstitu-ef612/qc_bestmodel_transformer.pth")
+            torch.save(model.state_dict(), results_dir + "qc_bestmodel_transformer.pth")
     
         print()
         print("Epoch" + str(epoch) + ":")
@@ -185,7 +187,7 @@ for i in range(0, len(val_acc)):
 plt.xlabel("Epochs")
 plt.ylabel("Validation Loss")
 plt.plot(epoch, val_loss)
-plt.savefig("/home/jupyter-arpit@broadinstitu-ef612/val_loss_qc_transformer.png")
+plt.savefig(results_dir + "val_loss_qc_transformer.png")
 
 # val_acc vs epoch
 plt.cla()
@@ -198,4 +200,4 @@ for i in range(0, len(val_acc)):
 plt.xlabel("Epochs")
 plt.ylabel("Validation Acc")
 plt.plot(epoch, val_acc)
-plt.savefig("/home/jupyter-arpit@broadinstitu-ef612/val_acc_qc_transformer.png")
+plt.savefig(results_dir +  "val_acc_qc_transformer.png")
